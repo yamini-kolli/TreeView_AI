@@ -1,0 +1,87 @@
+# --- Node / Frontend ---
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+dist/
+build/
+.cache/
+.tmp/
+*.tsbuildinfo
+
+# Vite/React app
+client/node_modules/
+client/.vite/
+client/dist/
+client/build/
+client/.cache/
+
+# Do NOT ignore lockfiles; keep deterministic installs
+#!package-lock.json
+#!yarn.lock
+#!pnpm-lock.yaml
+
+# --- Python / Backend ---
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+.eggs/
+.venv/
+venv/
+server/venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage/
+htmlcov/
+pip-wheel-metadata/
+
+# Backend specific
+server/__pycache__/
+
+# --- Environment files ---
+.env
+.env.*
+!*.example
+server/.env
+server/.env.*
+!server/.env.example
+client/.env
+client/.env.*
+!client/.env.example
+
+# --- Databases ---
+*.sqlite3
+*.sqlite
+*.db
+
+# --- Logs ---
+logs/
+*.log
+nohup.out
+
+# --- Docker / Local data ---
+docker/*.log
+docker-data/
+.env.docker
+
+# --- OS / Editor ---
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.iml
+*.swp
+
+# --- Misc cache ---
+coverage-final.json
+.parcel-cache/
+.eslintcache
+
