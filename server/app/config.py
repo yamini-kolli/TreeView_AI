@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     ASYNC_DATABASE_URL: str = os.getenv("ASYNC_DATABASE_URL", "postgresql+asyncpg://postgres:password@localhost:5432/tree_visualization_db")
     SECRET_KEY: str = os.getenv("SECRET_KEY", "your-super-secret-key-change-in-production")
     ALGORITHM: str = os.getenv("ALGORITHM", "HS256")
+    GEMINI_API_KEY : str = os.getenv("GEMINI_API_KEY", "AIzaSyBYjrkoMVkASo43MrD7rklKem_PLP29sQo")
     ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "1440"))
     ALLOWED_ORIGINS: List[str] = os.getenv(
         "ALLOWED_ORIGINS",

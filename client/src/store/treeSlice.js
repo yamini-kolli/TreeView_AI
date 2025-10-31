@@ -6,8 +6,18 @@ export const fetchSessions = createAsyncThunk('tree/fetchSessions', async () => 
   return data
 })
 
+export const getSession = createAsyncThunk('tree/getSession', async (id) => {
+  const { data } = await api.get(`/api/tree/sessions/${id}`)
+  return data
+})
+
 export const createSession = createAsyncThunk('tree/createSession', async (payload) => {
   const { data } = await api.post('/api/tree/sessions', payload)
+  return data
+})
+
+export const updateSession = createAsyncThunk('tree/updateSession', async ({ id, changes }) => {
+  const { data } = await api.put(`/api/tree/sessions/${id}`, changes)
   return data
 })
 
@@ -24,7 +34,13 @@ const slice = createSlice({
   },
   extraReducers: (b) => {
     b.addCase(fetchSessions.fulfilled, (s, a) => { s.sessions = a.payload })
+     .addCase(getSession.fulfilled, (s, a) => { s.current = a.payload })
      .addCase(createSession.fulfilled, (s, a) => { s.sessions.unshift(a.payload) })
+     .addCase(updateSession.fulfilled, (s, a) => {
+        const idx = s.sessions.findIndex(x => x.id === a.payload.id)
+        if (idx !== -1) s.sessions[idx] = a.payload
+        if (s.current && s.current.id === a.payload.id) s.current = a.payload
+     })
      .addCase(deleteSession.fulfilled, (s, a) => { s.sessions = s.sessions.filter(x => x.id !== a.payload) })
   }
 })

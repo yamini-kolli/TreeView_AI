@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react'
 
-export default function TreeControls({ onInsert, onDelete, onTraverse, onReset, sessionName = 'Tree', nodesCount = 0, edgesCount = 0 }) {
+export default function TreeControls({ onInsert, onDelete, onTraverse, onReset, onSave, sessionName = 'Tree', nodesCount = 0, edgesCount = 0 }) {
   const [addValue, setAddValue] = useState('')
   const [delValue, setDelValue] = useState('')
   const disabledInsert = useMemo(() => addValue.trim() === '', [addValue])
@@ -8,15 +8,13 @@ export default function TreeControls({ onInsert, onDelete, onTraverse, onReset, 
 
   return (
     <div className="p-3 bg-white border rounded-3 w-100" style={{ minWidth: 280 }}>
-      <div className="d-flex align-items-center justify-content-between mb-3">
-        <div>
-          <div className="text-muted small">{sessionName}</div>
-          <h5 className="m-0">Tree Controls</h5>
-        </div>
-        <button className="btn btn-primary" onClick={() => onReset?.()}>
-          <span className="me-2 bi bi-floppy"></span>Save Changes
-        </button>
+      <div className="mb-3">
+        <div className="text-muted small">{sessionName}</div>
+        <h5 className="m-0">Tree Controls</h5>
       </div>
+      <button className="btn btn-primary w-100 mb-3" onClick={() => onSave?.()}>
+        <span className="me-2 bi bi-floppy"></span>Save Changes
+      </button>
 
       <div className="mb-3">
         <div className="form-label">Add Node</div>
