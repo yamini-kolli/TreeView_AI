@@ -20,10 +20,17 @@ export default function TreeSession() {
   const { current } = useSelector(s => s.tree)
   useEffect(() => {
     const data = current?.tree_data
-    if (current?.id === id && data && (Array.isArray(data.nodes) || Array.isArray(data.edges))) {
-      setNodes(Array.isArray(data.nodes) ? data.nodes : [])
-      setEdges(Array.isArray(data.edges) ? data.edges : [])
-      setNodeSeq(Array.isArray(data.nodes) ? data.nodes.length : 0)
+    if (current?.id === id) {
+      if (data && (Array.isArray(data.nodes) || Array.isArray(data.edges))) {
+        setNodes(Array.isArray(data.nodes) ? data.nodes : [])
+        setEdges(Array.isArray(data.edges) ? data.edges : [])
+        setNodeSeq(Array.isArray(data.nodes) ? data.nodes.length : 0)
+      } else {
+        // New session (no tree_data) -> ensure ReactFlow panel is empty
+        setNodes([])
+        setEdges([])
+        setNodeSeq(0)
+      }
     }
   }, [current?.id, current?.updated_at])
 
@@ -64,9 +71,87 @@ export default function TreeSession() {
       if (meta) {
           // If backend returned authoritative tree_data, use it to update ReactFlow
           if (meta.tree_data && (Array.isArray(meta.tree_data.nodes) || Array.isArray(meta.tree_data.edges))) {
-            setNodes(Array.isArray(meta.tree_data.nodes) ? meta.tree_data.nodes : [])
-            setEdges(Array.isArray(meta.tree_data.edges) ? meta.tree_data.edges : [])
-            setNodeSeq(Array.isArray(meta.tree_data.nodes) ? meta.tree_data.nodes.length : nodeSeq)
+            // normalize numeric positions and compute bounding box
+            const rawNodes = Array.isArray(meta.tree_data.nodes) ? meta.tree_data.nodes.map(n => ({ ...n })) : []
+            const rawEdges = Array.isArray(meta.tree_data.edges) ? meta.tree_data.edges : []
+
+            const asNumber = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0 }
+            const normalizePos = (node) => {
+              const pos = node.position || {}
+              return { x: asNumber(pos.x), y: asNumber(pos.y) }
+            }
+
+            const bboxOf = (nodesArr, excludeIds = []) => {
+              const xs = []
+              const ys = []
+              nodesArr.forEach(n => {
+                if (excludeIds.includes(String(n.id))) return
+                const p = normalizePos(n)
+                xs.push(p.x)
+                ys.push(p.y)
+              })
+              if (xs.length === 0) return null
+              return { minX: Math.min(...xs), maxX: Math.max(...xs), minY: Math.min(...ys), maxY: Math.max(...ys) }
+            }
+
+            // ensure positions are numeric
+            rawNodes.forEach(n => { n.position = normalizePos(n) })
+
+            // If server provided apply_results with node ids, try to move any newly created nodes
+            // that ended up far outside the existing tree bbox closer to the tree so they are visible.
+            const results = Array.isArray(meta.apply_results) ? meta.apply_results : []
+            const createdIds = results.filter(r => r && r.success && r.node_id).map(r => String(r.node_id))
+
+            if (createdIds.length > 0) {
+              // compute bbox excluding the new nodes (treat them as to-be-placed)
+              const bboxExcl = bboxOf(rawNodes, createdIds)
+              const offset = 160
+              // if no existing nodes, fallback to center of wrapper
+              const wrapperRect = flowWrapperRef.current ? flowWrapperRef.current.getBoundingClientRect() : null
+
+              createdIds.forEach(cid => {
+                const node = rawNodes.find(nn => String(nn.id) === cid)
+                if (!node) return
+                const p = node.position || { x: 0, y: 0 }
+                let shouldMove = false
+                if (!bboxExcl) {
+                  shouldMove = true
+                } else {
+                  // if node is too far from bounding box (e.g., > 2*width away) or at origin
+                  const distX = Math.abs(p.x - ((bboxExcl.minX + bboxExcl.maxX) / 2))
+                  const bboxWidth = Math.max(1, bboxExcl.maxX - bboxExcl.minX)
+                  if (distX > Math.max(300, bboxWidth * 2) || (p.x === 0 && p.y === 0)) {
+                    shouldMove = true
+                  }
+                }
+
+                if (shouldMove) {
+                  if (bboxExcl) {
+                    const centerY = Math.floor((bboxExcl.minY + bboxExcl.maxY) / 2)
+                    node.position.x = bboxExcl.maxX + offset + Math.floor(Math.random() * 40 - 20)
+                    node.position.y = centerY + Math.floor(Math.random() * 40 - 20)
+                  } else if (wrapperRect) {
+                    node.position.x = Math.floor(wrapperRect.width / 2)
+                    node.position.y = Math.floor(wrapperRect.height / 2)
+                  } else {
+                    node.position.x = rawNodes.length * 120
+                    node.position.y = rawNodes.length * 60
+                  }
+                }
+              })
+            }
+
+            setNodes(rawNodes)
+            setEdges(rawEdges)
+            setNodeSeq(rawNodes.length)
+            // ensure the ReactFlow viewport shows newly created nodes
+            setTimeout(() => {
+              try {
+                reactFlowInstanceRef.current?.fitView?.({ padding: 0.12 })
+              } catch (err) {
+                // ignore
+              }
+            }, 60)
           } else {
             // apply operations if present (client-side fallback)
             if (Array.isArray(meta.operations)) {
@@ -178,16 +263,42 @@ export default function TreeSession() {
     }
 
     const newNode = { id, data: { label: String(value) }, position: { x, y }, targetPosition: 'top', sourcePosition: 'bottom' }
-    let newEdges = [...edges]
-    if (parentId) {
-      const parent = nodes.find(n => String(n.id) === String(parentId) || String(n.data?.label) === String(parentId))
-      if (parent) {
-        newEdges = [...newEdges, { id: `${parent.id}-${id}`, source: parent.id, target: id, animated: true, style: { stroke: '#0d6efd', strokeWidth: 2 }, markerEnd: { type: MarkerType.ArrowClosed, color: '#0d6efd', width: 18, height: 18 } }]
+
+    // If parent exists and was requested, place as a child: next level down and left/right of parent
+    const parent = parentId ? nodes.find(n => String(n.id) === String(parentId) || String(n.data?.label) === String(parentId)) : null
+    let finalX = x
+    let finalY = y
+    const hOffset = 140
+    const vStep = 120
+    if (parent && !explicitPos) {
+      const parentX = parent.position?.x || 0
+      const parentY = parent.position?.y || 0
+      finalX = side === 'left' ? parentX - hOffset : parentX + hOffset
+      finalY = parentY + vStep
+      // avoid collisions
+      let attempts = 0
+      while (nodes.some(n => Math.abs((n.position?.x || 0) - finalX) < 40 && Math.abs((n.position?.y || 0) - finalY) < 40) && attempts < 5) {
+        finalX += side === 'left' ? -hOffset : hOffset
+        finalY += 20
+        attempts += 1
       }
+    } else if (!explicitPos && nodes && nodes.length > 0) {
+      // standalone placement: place near tree bbox to the right
+      const xs = nodes.map(n => (n.position && n.position.x) || 0)
+      const ys = nodes.map(n => (n.position && n.position.y) || 0)
+      const maxX = Math.max(...xs)
+      const minY = Math.min(...ys)
+      const maxY = Math.max(...ys)
+      finalX = maxX + hOffset
+      finalY = Math.floor((minY + maxY) / 2)
     }
 
-    setNodes((nds) => [...nds, newNode])
-    setEdges(newEdges)
+    const nodeToAdd = { ...newNode, position: { x: finalX, y: finalY } }
+    setNodes((nds) => [...nds, nodeToAdd])
+    if (parent) {
+      const newEdge = { id: `${parent.id}-${nodeToAdd.id}`, source: parent.id, target: nodeToAdd.id, animated: true, style: { stroke: '#0d6efd', strokeWidth: 2 }, markerEnd: { type: MarkerType.ArrowClosed, color: '#0d6efd', width: 18, height: 18 } }
+      setEdges((eds) => [...eds, newEdge])
+    }
     setNodeSeq(s => s + 1)
     toast.success('Node added')
   }
@@ -223,7 +334,8 @@ export default function TreeSession() {
 
   const containerRef = useRef(null)
   const flowWrapperRef = useRef(null)
-  const [leftPct, setLeftPct] = useState(50)
+  const reactFlowInstanceRef = useRef(null)
+  const [leftPct, setLeftPct] = useState(70)
   const isDraggingRef = useRef(false)
 
   const onMouseDown = () => { isDraggingRef.current = true }
@@ -274,6 +386,7 @@ export default function TreeSession() {
           />
           <div ref={flowWrapperRef} className="border rounded w-100 h-100 bg-white">
           <ReactFlow
+            onInit={(instance) => { reactFlowInstanceRef.current = instance }}
             nodes={nodes.map(n => ({
               ...n,
               style: {
@@ -307,7 +420,8 @@ export default function TreeSession() {
             <MiniMap />
             <Controls />
             <Background gap={16} size={1} />
-          </ReactFlow>
+            </ReactFlow>
+            {/* after nodes/edges update we may want to fit view so newly added nodes are visible */}
           </div>
         </div>
       </div>

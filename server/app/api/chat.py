@@ -120,6 +120,76 @@ async def create_message(
         assistant_text = f"(Automated response not available) I received: {message_data.message}"
         assistant_meta = {"reply": assistant_text, "intent": "analysis", "highlights": [], "operations": [], "explanation": "Fallback response; GenAI not available."}
 
+    # small helper to normalize label/values extracted from free text or operations
+    def _normalize_label(raw_val):
+        try:
+            if raw_val is None:
+                return raw_val
+            # handle dicts like {'label': '90'} or {'value': '90'}
+            if isinstance(raw_val, dict):
+                for k in ('label', 'name', 'value', 'node'):
+                    if k in raw_val and raw_val[k] is not None:
+                        return _normalize_label(raw_val[k])
+                # otherwise try first value
+                vals = list(raw_val.values())
+                if vals:
+                    return _normalize_label(vals[0])
+                return ''
+            # handle lists
+            if isinstance(raw_val, (list, tuple)):
+                if len(raw_val) == 0:
+                    return ''
+                # prefer first non-empty normalized element
+                for el in raw_val:
+                    n = _normalize_label(el)
+                    if n:
+                        return n
+                return str(raw_val[0])
+
+            # coerce to string
+            v = str(raw_val).strip()
+            if not v:
+                return v
+
+            # remove surrounding backticks or code fences
+            v = re.sub(r"^`+|`+$", '', v)
+            v = re.sub(r"^```[a-zA-Z0-9]*\n|\n```$", '', v)
+
+            # if quoted, take inner content
+            m = re.search(r'["\']([^"\']+)["\']', v)
+            if m:
+                return m.group(1).strip()
+
+            # remove common leading phrases like 'node', 'with', 'label', 'named', optionally followed by ':' or '-'
+            v_clean = re.sub(r"^\s*(?:node\s+)?(?:with\s+)?(?:label|name|named|node)?\s*[:\-\s]*", '', v, flags=re.IGNORECASE)
+
+            # if remaining is short and meaningful, return it
+            if v_clean and v_clean.lower() not in ('with', 'node', 'label'):
+                # trim punctuation
+                v_clean = v_clean.strip(' \t\n\r\'\".,:;')
+                if v_clean:
+                    return v_clean
+
+            # try to extract patterns like 'create node 90' or 'node 90'
+            m = re.search(r"(?:create|add|insert)\s+node\s+([A-Za-z0-9 _\-\"']+)", v, flags=re.IGNORECASE)
+            if m:
+                return _normalize_label(m.group(1))
+
+            m = re.search(r"node(?:\s+(?:with\s+label|with\s+name|label|named))?\s*[\:\-]?\s*([A-Za-z0-9 _\-\"']+)\b", v, flags=re.IGNORECASE)
+            if m:
+                return _normalize_label(m.group(1))
+
+            # fallback: return last token if it's alphanumeric
+            parts = re.findall(r"[A-Za-z0-9 _-]+", v)
+            if parts:
+                candidate = parts[-1].strip()
+                if candidate.lower() not in ('with', 'label', 'node'):
+                    return candidate
+
+            return v
+        except Exception:
+            return raw_val
+
     # persist assistant message (initial creation)
     assistant_msg = ChatMessage(
         user_id=current_user.id,
@@ -130,8 +200,26 @@ async def create_message(
         intent_type=intent
     )
     # If assistant returned operations, attempt to apply them to the tree session
-    if assistant_meta and isinstance(assistant_meta.get('operations'), list) and message_data.tree_session_id:
-        ops = assistant_meta.get('operations')
+    if assistant_meta and message_data.tree_session_id:
+        ops = assistant_meta.get('operations') or []
+        # If the assistant replied with a command-like reply but didn't include operations,
+        # try a heuristic to infer an insert operation (e.g., "create node 40", "add node 4").
+        if not ops:
+            reply_text = (assistant_meta.get('reply') or assistant_meta.get('message') or '')
+            try:
+                # try multiple heuristics and normalize the extracted label
+                m = re.search(r"(?:create|add|insert)\s+node\s+([A-Za-z0-9 _\-\"']+)", reply_text, flags=re.IGNORECASE)
+                if not m:
+                    # avoid capturing 'with' from 'node with label 90' by matching optional 'with label' constructs
+                    m = re.search(r"node(?:\s+(?:with\s+label|with\s+name|label|named))?\s*[\:\-]?\s*([A-Za-z0-9 _\-\"']+)\b", reply_text, flags=re.IGNORECASE)
+                if m:
+                    inferred_val = _normalize_label(m.group(1))
+                    ops = [{'action': 'insert', 'value': inferred_val}]
+            except Exception:
+                pass
+        # only continue if we have a list of ops
+        if not isinstance(ops, list):
+            ops = []
         apply_results = []
         try:
             ts = db.query(TreeSession).filter(TreeSession.id == message_data.tree_session_id, TreeSession.user_id == current_user.id).first()
@@ -156,7 +244,8 @@ async def create_message(
                 for op in ops:
                     action = op.get('action')
                     if action == 'insert':
-                        value = op.get('value')
+                        # normalize the provided value so labels like 'with label 90' or quoted names yield the exact label
+                        value = _normalize_label(op.get('value'))
                         parent = op.get('parent')
                         # Detect side/direction from several possible keys the assistant might use
                         side_raw = None
@@ -182,6 +271,8 @@ async def create_message(
                         else:
                             # leave as-is (may be empty)
                             pass
+                        # Always create a new node for insert operations.
+                        # Do NOT treat an existing node with the same label as a reason to skip creation.
                         new_id = str(uuid.uuid4())
                         # find parent by id or by label
                         parent_node = None
@@ -192,25 +283,87 @@ async def create_message(
                                 break
 
                         # create new node
-                        # determine position: honor explicit position, otherwise place relative to parent
+                        # determine position: honor explicit position, otherwise
+                        # if parent exists and this is an insert operation, place the new node
+                        # at the next level (parent_y + vertical_step) and offset left/right
+                        # depending on side. If no parent, place near the tree bounding box to the right.
+                        h_offset = 140
+                        v_step = 120
                         if explicit_pos:
                             new_x = explicit_pos.get('x', 0)
                             new_y = explicit_pos.get('y', 0)
                         elif parent_node:
+                            # Before creating a new child, check whether the parent already
+                            # has both a left and a right child. We infer left/right by
+                            # comparing child x to parent x (child.x < parent.x => left).
+                            try:
+                                parent_x = parent_node.get('position', {}).get('x', 0)
+                                # gather children of this parent from existing edges
+                                left_found = False
+                                right_found = False
+                                for e in edges:
+                                    try:
+                                        if e.get('source') == parent_node.get('id'):
+                                            child_id = e.get('target')
+                                            # find child node
+                                            child_n = next((nn for nn in nodes if nn.get('id') == child_id), None)
+                                            if child_n and 'position' in child_n:
+                                                child_x = child_n.get('position', {}).get('x', 0)
+                                                if child_x < parent_x:
+                                                    left_found = True
+                                                else:
+                                                    right_found = True
+                                            else:
+                                                # if no positional info, be conservative and consider it occupying one side
+                                                right_found = True
+                                    except Exception:
+                                        continue
+                                if left_found and right_found:
+                                    # parent is full; do not create a new child
+                                    reason_text = 'Parent already has both left and right children'
+                                    apply_results.append({'operation': op, 'success': False, 'reason': reason_text})
+                                    # user-facing reply: replace or augment assistant reply/message so the chat shows a clear explanation
+                                    user_msg = f"I won't create the node '{value}' because the specified parent already has both left and right children."
+                                    try:
+                                        # set assistant_meta.reply so frontend JSON includes the explanation
+                                        assistant_meta['reply'] = user_msg
+                                    except Exception:
+                                        pass
+                                    try:
+                                        # also update the assistant message that will be stored/displayed in chat
+                                        assistant_msg.message = user_msg
+                                    except Exception:
+                                        pass
+                                    # skip creation for this op
+                                    continue
+                            except Exception:
+                                # if any error occurs in detection, fall back to normal placement
+                                pass
                             parent_x = parent_node.get('position', {}).get('x', 0)
                             parent_y = parent_node.get('position', {}).get('y', 0)
-                            offset = 160
                             if side == 'left':
-                                new_x = parent_x - offset
-                            elif side == 'right':
-                                new_x = parent_x + offset
+                                new_x = parent_x - h_offset
                             else:
-                                # default to right if side not specified
-                                new_x = parent_x + offset
-                            new_y = parent_y + 40
+                                new_x = parent_x + h_offset
+                            new_y = parent_y + v_step
+                            # avoid collisions: if another node is too close, shift further
+                            attempts = 0
+                            while any(abs(n.get('position', {}).get('x', 0) - new_x) < 40 and abs(n.get('position', {}).get('y', 0) - new_y) < 40 for n in nodes) and attempts < 5:
+                                new_x += h_offset if side != 'left' else -h_offset
+                                new_y += 20
+                                attempts += 1
                         else:
-                            new_x = 0
-                            new_y = 0
+                            if nodes:
+                                xs = [n.get('position', {}).get('x', 0) for n in nodes]
+                                ys = [n.get('position', {}).get('y', 0) for n in nodes]
+                                max_x = max(xs)
+                                min_y = min(ys)
+                                max_y = max(ys)
+                                new_x = max_x + h_offset
+                                new_y = int((min_y + max_y) / 2)
+                            else:
+                                new_x = 0
+                                new_y = 0
 
                         new_node = {
                             'id': new_id,
@@ -220,9 +373,20 @@ async def create_message(
                             'sourcePosition': 'bottom',
                             'targetPosition': 'top'
                         }
+                        # Append unconditionally (allow duplicate labels)
                         nodes.append(new_node)
 
-                        # create edge from parent to new node if parent found
+                        # If the assistant's human-readable reply suggested the node already existed,
+                        # make a small note in the reply so the frontend can surface the created id.
+                        try:
+                            reply_text_lower = (assistant_meta.get('reply') or assistant_meta.get('message') or '').lower()
+                            if 'already exists' in reply_text_lower or 'already present' in reply_text_lower:
+                                note = f"\n(Automated) Created a new node with id {new_id} even though a node with the same label existed."
+                                assistant_meta['reply'] = (assistant_meta.get('reply') or '') + note
+                        except Exception:
+                            pass
+
+                        # If a parent was provided and matched, create an edge from parent -> new node
                         if parent_node:
                             edge_id = f"reactflow__edge-{parent_node.get('id')}-{new_id}"
                             new_edge = {
@@ -236,7 +400,7 @@ async def create_message(
                             edges.append(new_edge)
                             apply_results.append({'operation': op, 'success': True, 'node_id': new_id, 'edge_id': edge_id})
                         else:
-                            apply_results.append({'operation': op, 'success': False, 'reason': 'Parent node not found'})
+                            apply_results.append({'operation': op, 'success': True, 'node_id': new_id})
 
                 # write back tree_data
                 tree_data['nodes'] = nodes
