@@ -68,8 +68,8 @@ async def create_message(
             "user_message": message_data.message,
             "current_tree_state": current_tree_state
         }
-
-        contents = system_prompt + "\nUser payload (JSON):\n" + json.dumps(user_payload)
+        # pretty-print the user payload so multiple tree objects (if present) start on new lines
+        contents = system_prompt + "\nUser payload (JSON):\n" + json.dumps(user_payload, indent=2)
 
         response = client.models.generate_content(model="gemini-2.5-flash", contents=contents)
         print("GenAI Response:", response)
