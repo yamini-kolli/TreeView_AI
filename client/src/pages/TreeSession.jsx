@@ -43,28 +43,64 @@ export default function TreeSession() {
     const lastAssistant = [...messages].reverse().find(m => !m.is_user_message)
     if (!lastAssistant) return
     try {
-      const meta = lastAssistant.response ? JSON.parse(lastAssistant.response) : null
-      if (meta) {
-        // apply operations if present
-        if (Array.isArray(meta.operations)) {
-          meta.operations.forEach(op => {
-            const action = (op.action || '').toLowerCase()
-            if (action === 'insert' && (op.value || op.label)) {
-              insertNode(op.value || op.label)
-            } else if (action === 'delete' && (op.value || op.label)) {
-              deleteNodeByValue(op.value || op.label)
-            } else if (action === 'highlight' && op.node_id) {
-              setHighlightId(String(op.node_id))
-              setTimeout(() => setHighlightId(null), 2000)
+      let meta = null
+      if (lastAssistant.response) {
+        if (typeof lastAssistant.response === 'string') {
+          try {
+            meta = JSON.parse(lastAssistant.response)
+          } catch (e) {
+            // sometimes response may be double-encoded or include escaped characters
+            try {
+              meta = JSON.parse(JSON.parse(lastAssistant.response))
+            } catch (e2) {
+              // give up and leave meta null
+              meta = null
             }
-          })
+          }
+        } else if (typeof lastAssistant.response === 'object') {
+          meta = lastAssistant.response
         }
-        // apply highlights array
-        if (Array.isArray(meta.highlights) && meta.highlights.length > 0) {
-          setHighlightIds(meta.highlights.map(String))
-          // clear after a short time
-          setTimeout(() => setHighlightIds([]), 2000)
-        }
+      }
+      if (meta) {
+          // If backend returned authoritative tree_data, use it to update ReactFlow
+          if (meta.tree_data && (Array.isArray(meta.tree_data.nodes) || Array.isArray(meta.tree_data.edges))) {
+            setNodes(Array.isArray(meta.tree_data.nodes) ? meta.tree_data.nodes : [])
+            setEdges(Array.isArray(meta.tree_data.edges) ? meta.tree_data.edges : [])
+            setNodeSeq(Array.isArray(meta.tree_data.nodes) ? meta.tree_data.nodes.length : nodeSeq)
+          } else {
+            // apply operations if present (client-side fallback)
+            if (Array.isArray(meta.operations)) {
+              meta.operations.forEach(op => {
+                const action = (op.action || '').toLowerCase()
+                if (action === 'insert' && (op.value || op.label)) {
+                  insertNode(op)
+                } else if (action === 'delete' && (op.value || op.label)) {
+                  deleteNodeByValue(op.value || op.label)
+                } else if (action === 'highlight' && op.node_id) {
+                  setHighlightId(String(op.node_id))
+                  setTimeout(() => setHighlightId(null), 2000)
+                }
+              })
+            }
+          }
+
+          // apply highlights array
+          if (Array.isArray(meta.highlights) && meta.highlights.length > 0) {
+            setHighlightIds(meta.highlights.map(String))
+            // clear after a short time
+            setTimeout(() => setHighlightIds([]), 2000)
+          }
+
+          // show results of applying operations (if provided)
+          if (Array.isArray(meta.apply_results) && meta.apply_results.length > 0) {
+            meta.apply_results.forEach(r => {
+              if (r.success) {
+                toast.success('Operation applied successfully')
+              } else {
+                toast.error('Operation failed: ' + (r.reason || 'unknown'))
+              }
+            })
+          }
       }
     } catch (e) {
       // ignore parse errors
@@ -72,14 +108,87 @@ export default function TreeSession() {
     }
   }, [messages])
 
-  const insertNode = (value) => {
-    const nextId = String(nodeSeq + 1)
-    const y = (nodes.length % 5) * 120
-    const x = Math.floor(nodes.length / 5) * 140
-    const newNode = { id: nextId, data: { label: String(value) }, position: { x, y }, targetPosition: 'top', sourcePosition: 'bottom' }
-    // standalone insertion: do not auto-link; user decides connections later
-    setNodes([...nodes, newNode])
-    setNodeSeq(nodeSeq + 1)
+  const generateId = () => `${Date.now().toString(36)}-${Math.floor(Math.random()*10000)}`
+
+  const insertNode = (opOrValue) => {
+    // support being called with either a primitive value (label) or an operation object
+    let value = null
+    let parentId = null
+    let side = ''
+    let explicitPos = null
+    if (opOrValue && typeof opOrValue === 'object') {
+      value = opOrValue.value || opOrValue.label
+      parentId = opOrValue.parent_id || opOrValue.parent || opOrValue.node_id || opOrValue.target
+
+      // Detect explicit position objects (x/y) first
+      if (opOrValue.position && typeof opOrValue.position === 'object' && (opOrValue.position.x != null || opOrValue.position.y != null)) {
+        explicitPos = opOrValue.position
+      }
+
+      // Look for side/direction in multiple possible keys
+      const candidates = [opOrValue.side, opOrValue.direction, opOrValue.location, opOrValue.where, opOrValue.pos, opOrValue.position?.side]
+      for (const c of candidates) {
+        if (!c) continue
+        if (typeof c === 'string') {
+          const s = c.toLowerCase()
+          if (s.includes('left')) { side = 'left'; break }
+          if (s.includes('right')) { side = 'right'; break }
+        }
+        // if candidate is an object with x/y, treat as explicit position
+        if (typeof c === 'object' && (c.x != null || c.y != null)) { explicitPos = c; break }
+      }
+    } else {
+      value = opOrValue
+    }
+    if (!value) { toast.warn('No value to insert'); return }
+
+    const id = generateId()
+    let x = 0, y = 0
+
+    // If explicit position provided, honor it
+    if (explicitPos && explicitPos.x != null && explicitPos.y != null) {
+      x = explicitPos.x
+      y = explicitPos.y
+    } else if (parentId) {
+      // place relative to parent (left/right) if possible
+      const parent = nodes.find(n => String(n.id) === String(parentId) || String(n.data?.label) === String(parentId))
+      if (parent) {
+        const offset = 160
+        const parentX = parent.position?.x != null ? parent.position.x : 0
+        const parentY = parent.position?.y != null ? parent.position.y : 0
+        x = parentX + (side === 'left' ? -offset : offset)
+        y = parentY + 40
+      } else {
+        // fallback to center of visible flow area
+        const rect = flowWrapperRef.current ? flowWrapperRef.current.getBoundingClientRect() : null
+        x = rect ? rect.width / 2 - 42 : (nodes.length ? nodes.length * 100 : 0)
+        y = rect ? rect.height / 2 - 42 : (nodes.length ? nodes.length * 60 : 0)
+      }
+    } else {
+      // default: put new node in the center of the ReactFlow wrapper (if available)
+      const rect = flowWrapperRef.current ? flowWrapperRef.current.getBoundingClientRect() : null
+      if (rect) {
+        x = rect.width / 2 - 42
+        y = rect.height / 2 - 42
+      } else {
+        // fallback grid layout
+        y = (nodes.length % 5) * 120
+        x = Math.floor(nodes.length / 5) * 140
+      }
+    }
+
+    const newNode = { id, data: { label: String(value) }, position: { x, y }, targetPosition: 'top', sourcePosition: 'bottom' }
+    let newEdges = [...edges]
+    if (parentId) {
+      const parent = nodes.find(n => String(n.id) === String(parentId) || String(n.data?.label) === String(parentId))
+      if (parent) {
+        newEdges = [...newEdges, { id: `${parent.id}-${id}`, source: parent.id, target: id, animated: true, style: { stroke: '#0d6efd', strokeWidth: 2 }, markerEnd: { type: MarkerType.ArrowClosed, color: '#0d6efd', width: 18, height: 18 } }]
+      }
+    }
+
+    setNodes((nds) => [...nds, newNode])
+    setEdges(newEdges)
+    setNodeSeq(s => s + 1)
     toast.success('Node added')
   }
 
@@ -113,6 +222,7 @@ export default function TreeSession() {
   }
 
   const containerRef = useRef(null)
+  const flowWrapperRef = useRef(null)
   const [leftPct, setLeftPct] = useState(50)
   const isDraggingRef = useRef(false)
 
@@ -162,7 +272,7 @@ export default function TreeSession() {
             nodesCount={nodes.length}
             edgesCount={edges.length}
           />
-          <div className="border rounded w-100 h-100 bg-white">
+          <div ref={flowWrapperRef} className="border rounded w-100 h-100 bg-white">
           <ReactFlow
             nodes={nodes.map(n => ({
               ...n,

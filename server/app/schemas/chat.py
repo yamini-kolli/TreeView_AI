@@ -7,6 +7,7 @@ class ChatMessageBase(BaseModel):
 
 class ChatMessageCreate(ChatMessageBase):
     tree_session_id: str
+    current_tree_state: Optional[dict] = None
 
 class ChatMessageResponse(BaseModel):
     id: str
