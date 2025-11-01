@@ -9,8 +9,8 @@ load_dotenv()
 class Settings(BaseSettings):
     APP_NAME: str = os.getenv("APP_NAME", "Tree Visualization AI")
     DEBUG: bool = os.getenv("DEBUG", "True") == "True"
-    DATABASE_URL: str = os.getenv("DATABASE_URL", "postgresql://postgres:password@localhost:5432/tree_visualization_db")
-    ASYNC_DATABASE_URL: str = os.getenv("ASYNC_DATABASE_URL", "postgresql+asyncpg://postgres:password@localhost:5432/tree_visualization_db")
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "postgresql://postgres.evxziobvxydsugazcmjn:Mukesh%405344@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres")
+    ASYNC_DATABASE_URL: str = os.getenv("ASYNC_DATABASE_URL", "postgresql+asyncpg://postgres.evxziobvxydsugazcmjn:Mukesh%405344@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres")
     SECRET_KEY: str = os.getenv("SECRET_KEY", "your-super-secret-key-change-in-production")
     ALGORITHM: str = os.getenv("ALGORITHM", "HS256")
     GEMINI_API_KEY : str = os.getenv("GEMINI_API_KEY", "AIzaSyBYjrkoMVkASo43MrD7rklKem_PLP29sQo")

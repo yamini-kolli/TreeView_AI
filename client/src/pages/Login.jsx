@@ -11,14 +11,20 @@ export default function Login() {
 
   useEffect(() => {
     if (token) {
-      dispatch(meThunk())
-      navigate('/')
+      dispatch(meThunk()).then(() => {
+        navigate('/')
+      })
     }
   }, [token])
 
-  const onSubmit = (e) => {
+  const onSubmit = async (e) => {
     e.preventDefault()
-    dispatch(loginThunk(form))
+    const result = await dispatch(loginThunk(form))
+    if (result.error) {
+      // Login failed, error will be shown from the error state
+      return
+    }
+    // Login successful, token effect will handle navigation
   }
 
   return (

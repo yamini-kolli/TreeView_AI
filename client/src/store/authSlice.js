@@ -62,19 +62,34 @@ const slice = createSlice({
   },
   extraReducers: (builder) => {
     builder
+      .addCase(loginThunk.pending, (state) => {
+        state.error = null
+        state.status = 'loading'
+      })
       .addCase(loginThunk.fulfilled, (state, action) => {
         state.token = action.payload.access_token
+        state.error = null
+        state.status = 'authenticated'
         localStorage.setItem(tokenKey, state.token)
+      })
+      .addCase(signupThunk.pending, (state) => {
+        state.error = null
+        state.status = 'loading'
       })
       .addCase(signupThunk.fulfilled, (state) => {
         state.status = 'signed_up'
+        state.error = null
       })
       .addCase(meThunk.fulfilled, (state, action) => {
         state.user = action.payload
+        state.status = 'authenticated'
       })
       .addMatcher(
         (a) => a.type.startsWith('auth/') && a.type.endsWith('/rejected'),
-        (state, action) => { state.error = action.payload }
+        (state, action) => { 
+          state.error = action.payload
+          state.status = 'error'
+        }
       )
   }
 })

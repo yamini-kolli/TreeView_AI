@@ -12,7 +12,11 @@ export default function Signup() {
   const onSubmit = async (e) => {
     e.preventDefault()
     const res = await dispatch(signupThunk(form))
-    if (res.type.endsWith('fulfilled')) navigate('/login')
+    if (!res.error) {
+      // Show success message and redirect to login
+      alert('Account created successfully! Please login.')
+      navigate('/login')
+    }
   }
 
   return (
