@@ -118,7 +118,7 @@ API Endpoints (typical / examples)
 
 Screenshots
 
-  - Login page
+  - Login page (loginpage.png)
     
   - Signup page
   - Dashboard
