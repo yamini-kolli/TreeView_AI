@@ -1,0 +1,41 @@
+# Multi-stage Dockerfile: build Vite frontend and package FastAPI server
+
+# --- Frontend build stage ---
+FROM node:18 AS frontend-build
+WORKDIR /app/client
+COPY client/package*.json ./
+RUN npm ci
+COPY client/ .
+# build the Vite app (outputs to client/dist)
+RUN npm run build
+
+# --- Python runtime stage ---
+FROM python:3.11-slim
+
+# Default to serving SPA inside the container. You can still override at runtime.
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 DEPLOY_ENV=cloud
+
+# Install minimal system deps
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install Python deps (copy requirements first to improve Docker cache)
+COPY server/requirements.txt /app/server/requirements.txt
+RUN pip install --upgrade pip && pip install --no-cache-dir -r /app/server/requirements.txt
+
+# Copy server code into /app/server so that server/app/main.py resolves two levels up to /app
+COPY server/ /app/server/
+
+# Copy frontend build into the runtime image so FastAPI can serve it from /app/client/dist
+RUN mkdir -p /app/client/dist
+COPY --from=frontend-build /app/client/dist /app/client/dist
+
+# Runtime settings
+ENV PYTHONPATH=/app/server
+EXPOSE 8080
+
+# Run the app with Uvicorn
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--proxy-headers"]

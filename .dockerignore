@@ -1,0 +1,12 @@
+node_modules
+client/node_modules
+server/.venv
+dist
+build
+.env
+*.pyc
+__pycache__
+.git
+.gitignore
+.dockerignore
+README.md
