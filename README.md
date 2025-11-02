@@ -1,11 +1,13 @@
 # TreeView AI
 
-Project Overview  
+# Project Overview  
 A full-stack tree-editor application with an AI assistant that helps create and edit tree nodes visually using React Flow. Supports session-based trees, user authentication, and real-time assistant-driven node operations (insert/delete/connect). Built with React on the frontend and Node/Express on the backend. Docker support is included for easy deployment.
 
-Live link: (add your deployed URL here)
+# Live link: (http://ec2-13-54-127-161.ap-southeast-2.compute.amazonaws.com:8080)
+                  or
+                  (http://13.54.127.161:8080/)
 
-Features Implemented
+# Features Implemented
 - ✅ User authentication (Sign-up / Login)
 - ✅ Compact brand navbar: logo + title on auth pages; title + Logout on Dashboard & Session pages
 - ✅ Dashboard with session list and create session flow
@@ -19,9 +21,9 @@ Features Implemented
 - ✅ UX improvements: "Signing in..." button state, login error message shown on failure
 - ✅ Dockerized backend image and env-file support
 
-Tech Stack
+# Tech Stack
 
-Frontend
+# Frontend
 - React 18
 - React Router
 - React Flow (visual tree editor)
@@ -29,22 +31,23 @@ Frontend
 - Axios / fetch for APIs
 - Toast library (toasts for assistant/user actions)
 
-Backend
+# Backend
 - Node.js & Express
 - JWT authentication (auth slice)
 - AI assistant integration (server-side or proxied)
 - Persistence for sessions / nodes / edges (DB service — configure in server .env)
 
-DevOps
+# DevOps
 - Docker (image & container usage supported)
 - .env support for environment variables
 
-Prerequisites
+# Prerequisites
 - Node 18+ / npm
 - Docker Desktop (for containerized run)
 - Git
+- Postman
 
-Quick Start (local development)
+# Quick Start (local development)
 
 1. Clone repository
 ```powershell
@@ -111,7 +114,7 @@ Screenshots
   - Dashboard
   - Tree session (React Flow)
 
-Development Process
+# Development Process
 The project was developed as a full-stack application. Key steps included:
 - Designing session + tree data structures to support nodes and edges
 - Integrating React Flow for visual editing and dynamic node/edge management
@@ -120,12 +123,10 @@ The project was developed as a full-stack application. Key steps included:
 - Improving UX: suppress noisy toasts for historical GET responses, show "Signing in..." while auth is in progress, and redirect to dashboard after successful signup
 - Dockerizing the backend image and providing env-file support
 
-Challenges Faced & Solutions
+# Challenges Faced & Solutions
 - Noisy toasts from history: Suppressed toasts for GET /history and allowed toasts only after a user-initiated POST succeeded.
 - Incorrect child occupancy detection: Changed logic to rely on explicit edge metadata (edge.data.side) or node positions; removed conservative fallbacks that produced false assistant messages.
 - Port conflicts when running containers: Recommend checking running containers/processes or changing host port mapping.
-
-Test Cases (high level)
 
 Backend
 - Auth: register, login success, login fail (invalid credentials), token protected endpoints
@@ -151,5 +152,4 @@ Acknowledgements / Resources
 - Redux Toolkit
 - Your AI provider / assistant integration details
 
-Notes
-- This README is a project-focused template tailored to the TreeView AI app in this workspace. Adjust API endpoints and run commands to match your server implementation and environment.
+
