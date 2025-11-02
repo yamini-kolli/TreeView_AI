@@ -4,8 +4,7 @@
 A full-stack tree-editor application with an AI assistant that helps create and edit tree nodes visually using React Flow. Supports session-based trees, user authentication, and real-time assistant-driven node operations (insert/delete/connect). Built with React on the frontend and Node/Express on the backend. Docker support is included for easy deployment.
 
 # Live link: (http://ec2-13-54-127-161.ap-southeast-2.compute.amazonaws.com:8080)
-                  or
-                  (http://13.54.127.161:8080/)
+# Alternative: (http://13.54.127.161:8080/)
 
 # Features Implemented
 - ✅ User authentication (Sign-up / Login)
