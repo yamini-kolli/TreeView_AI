@@ -1,7 +1,7 @@
 # TreeView AI
 
 # Project Overview  
-A full-stack tree-editor application with an AI assistant that helps create and edit tree nodes visually using React Flow. Supports session-based trees, user authentication, and real-time assistant-driven node operations (insert/delete/connect). Built with React on the frontend and Node/Express on the backend. Docker support is included for easy deployment.
+A full-stack tree-editor application with an AI assistant that helps create and edit tree nodes visually using React Flow. Supports session-based trees, user authentication, and real-time assistant-driven node operations (insert/delete/connect). Built with React on the frontend and FastApi on the backend. Docker support is included for easy deployment.
 
 # Live link: (http://ec2-13-54-127-161.ap-southeast-2.compute.amazonaws.com:8080)
 # Alternative: (http://13.54.127.161:8080/)
@@ -29,28 +29,34 @@ A full-stack tree-editor application with an AI assistant that helps create and 
 - Redux / Redux Toolkit (slices: auth, chat, tree)
 - Axios / fetch for APIs
 - Toast library (toasts for assistant/user actions)
+- Bootstrap 5.3
+- Reactstrap
 
 # Backend
-- Node.js & Express
+- FastAPI
+- Uvicorn – ASGI web server to run FastAPI applications
 - JWT authentication (auth slice)
-- AI assistant integration (server-side or proxied)
+- google-genai -- AI assistant integration 
 - Persistence for sessions / nodes / edges (DB service — configure in server .env)
+# Database
+- PostgreSQL
+- SQLAlchemy
 
 # DevOps
 - Docker (image & container usage supported)
-- .env support for environment variables
+- Docker Compose
+# Cloud
+- AWS EC2 – Hosting your backend (FastAPI + Docker).
 
 # Prerequisites
-- Node 18+ / npm
 - Docker Desktop (for containerized run)
 - Git
-- Postman
-
+  
 # Quick Start (local development)
 
 1. Clone repository
 ```powershell
-git clone <your-repo-url>
+git clone (https://github.com/yamini-kolli/TreeView_AI.git)
 cd TreeView_AI
 ```
 
@@ -59,16 +65,25 @@ cd TreeView_AI
 cd client
 npm install
 npm run dev
-# open http://localhost:3000 (or the port shown)
+# open http://localhost:5143 (or the port shown)
 ```
 
 3. Backend (dev)
 ```powershell
 cd server
-npm install
-# set environment variables in server/.env
-npm run dev
-# or: node dist/index.js (depending on your setup)
+# create Python virtual env (PowerShell)
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+# install dependencies
+pip install -r requirements.txt
+
+# copy or create environment file
+# adjust values in server/.env (DB, JWT secret, AI keys, etc.)
+copy .env.example .env   # or create server/.env manually and fill values
+# start FastAPI (adjust module path if your app entry is different)
+uvicorn server.main:app --reload --host 0.0.0.0 --port 8080
+
+# API will be available at http://localhost:8080 (adjust port if changed)
 ```
 
 4. With Docker (containerized)
@@ -101,14 +116,10 @@ API Endpoints (typical / examples)
   - POST /api/sessions/:id/nodes — (optional) create node via API
   - POST /api/sessions/:id/edges — (optional) create edge via API
 
-Default Test Users / Example credentials
-(Add or update these in your seeded DB / fixtures)
-- admin@example.com / admin123 (Admin)
-- user@example.com / user123 (Member)
-
 Screenshots
-- Add screenshots here (e.g., /assets/screenshots/) or paste links:
+
   - Login page
+    
   - Signup page
   - Dashboard
   - Tree session (React Flow)
