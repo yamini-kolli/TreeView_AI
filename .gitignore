@@ -46,15 +46,15 @@ pip-wheel-metadata/
 server/__pycache__/
 
 # --- Environment files ---
-.env
-.env.*
+# .env
+# .env.*
 !*.example
-server/.env
-server/.env.*
-!server/.env.example
-client/.env
-client/.env.*
-!client/.env.example
+# # server/.env
+# # server/.env.*
+# !server/.env.example
+# client/.env
+# client/.env.*
+# !client/.env.example
 
 # --- Databases ---
 *.sqlite3
@@ -69,7 +69,7 @@ nohup.out
 # --- Docker / Local data ---
 docker/*.log
 docker-data/
-.env.docker
+# .env.docker
 
 # --- OS / Editor ---
 .DS_Store
