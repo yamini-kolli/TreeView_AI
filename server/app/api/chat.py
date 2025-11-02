@@ -42,7 +42,7 @@ async def create_message(
     assistant_text = None
     assistant_meta = None
     intent = None
-
+    print("Calling Gemini/GenAI for message:", message_data.message)
     try:
         if genai is None:
             raise RuntimeError("genai library not available")
