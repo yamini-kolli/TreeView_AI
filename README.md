@@ -1,10 +1,13 @@
-# TreeView AI
+## TreeView AI
 
 # Project Overview  
 A full-stack tree-editor application with an AI assistant that helps create and edit tree nodes visually using React Flow. Supports session-based trees, user authentication, and real-time assistant-driven node operations (insert/delete/connect). Built with React on the frontend and FastApi on the backend. Docker support is included for easy deployment.
 
-# Live link: (http://ec2-13-54-127-161.ap-southeast-2.compute.amazonaws.com:8080)
-# Alternative: (http://13.54.127.161:8080/)
+## 🌐 Live Links
+
+**Live on AWS EC2:** [TreeView AI on EC2](http://ec2-13-54-127-161.ap-southeast-2.compute.amazonaws.com:8080)  
+**Alternative Access:** [http://13.54.127.161:8080/](http://13.54.127.161:8080/)
+
 
 # Features Implemented
 - ✅ User authentication (Sign-up / Login)
@@ -118,12 +121,20 @@ API Endpoints (typical / examples)
 
 Screenshots
 
-  - Login page (loginpage.png)
-    
-  - Signup page
-  - Dashboard
-  - Tree session (React Flow)
+  ## Screenshots
 
+### Login Page  
+![Login Page](https://raw.githubusercontent.com/yamini-kolli/TreeView_AI/main/loginpage.png)
+
+### Signup Page  
+![Signup Page](https://raw.githubusercontent.com/yamini-kolli/TreeView_AI/main/signup.png)
+
+### Dashboard page
+  ![Dashboard Page](https://raw.githubusercontent.com/yamini-kolli/TreeView_AI/main/dashboardpage.png)
+
+### Tree Session (React Flow)  
+![Tree Session](https://raw.githubusercontent.com/yamini-kolli/TreeView_AI/main/TreeSessionpage.png)
+  
 # Development Process
 The project was developed as a full-stack application. Key steps included:
 - Designing session + tree data structures to support nodes and edges
@@ -149,17 +160,8 @@ Frontend
 - Dashboard: lists sessions; create session brings user to an empty React Flow canvas
 - TreeSession: assistant inserts nodes with edges; left/right child placement enforced; toasts suppressed for historical GET responses and enabled for post-triggered assistant replies
 
-Contributing
-- Open issues for bugs or feature requests
-- Create feature branches and PRs against main
-- Keep UI and server validations in sync (especially for binary-child rules)
-
-License
-- (Add your preferred license information here)
-
-Acknowledgements / Resources
-- React Flow (https://reactflow.dev)
-- Redux Toolkit
-- Your AI provider / assistant integration details
-
+## 🙌 Acknowledgements / Resources
+- [React Flow](https://reactflow.dev)  
+- [Redux Toolkit](https://redux-toolkit.js.org/)  
+- Assistant integration powered by Google GenAI
 
