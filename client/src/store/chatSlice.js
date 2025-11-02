@@ -1,25 +1,18 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit'
 import api from '../utils/api'
-import { getSession } from './treeSlice'
 
 export const fetchHistory = createAsyncThunk('chat/history', async (sessionId) => {
   const { data } = await api.get(`/api/chat/history/${sessionId}`)
   return data
 })
 
-export const sendMessage = createAsyncThunk('chat/send', async (payloadObj, thunkAPI) => {
+export const sendMessage = createAsyncThunk('chat/send', async (payloadObj) => {
   // allow client to pass current tree state (nodes/edges) so the Supervisor Agent can make structural changes
   // payloadObj shape: { sessionId, message, current_tree_state }
   const { sessionId, message, current_tree_state } = payloadObj || {}
   const payload = { tree_session_id: sessionId, message }
   if (current_tree_state) payload.current_tree_state = current_tree_state
   const { data } = await api.post('/api/chat/message', payload)
-  // refresh the authoritative session so UI shows persisted tree_data
-  try {
-    if (sessionId) thunkAPI.dispatch(getSession(sessionId))
-  } catch (e) {
-    // ignore
-  }
   return data
 })
 
@@ -32,7 +25,8 @@ const slice = createSlice({
   name: 'chat',
   initialState: { messages: [], loading: false },
   reducers: {
-    clearChat(state) { state.messages = [] }
+    clearChat(state) { state.messages = [] },
+    addLocalMessage(state, action) { state.messages.push(action.payload) }
   },
   extraReducers: (b) => {
     b.addCase(fetchHistory.fulfilled, (s, a) => { s.messages = a.payload.messages || [] })
@@ -43,7 +37,7 @@ const slice = createSlice({
   }
 })
 
-export const { clearChat } = slice.actions
+export const { clearChat, addLocalMessage } = slice.actions
 export default slice.reducer
 
 

@@ -2,7 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import ReactFlow, { Background, Controls, MiniMap, addEdge, applyNodeChanges, applyEdgeChanges, MarkerType } from 'reactflow'
 import { useDispatch, useSelector } from 'react-redux'
 import { useParams, useNavigate } from 'react-router-dom'
-import { fetchHistory, sendMessage, clearHistory } from '../store/chatSlice'
+import { fetchHistory, sendMessage, clearHistory, addLocalMessage } from '../store/chatSlice'
+import { logout } from '../store/authSlice'
 import { getSession, updateSession } from '../store/treeSlice'
 import { toast } from 'react-toastify'
 import TreeControls from '../components/TreeControls'
@@ -26,7 +27,7 @@ export default function TreeSession() {
         setEdges(Array.isArray(data.edges) ? data.edges : [])
         setNodeSeq(Array.isArray(data.nodes) ? data.nodes.length : 0)
       } else {
-        // New session (no tree_data) -> ensure ReactFlow panel is empty
+        // new session or no tree data: ensure the ReactFlow panel is empty
         setNodes([])
         setEdges([])
         setNodeSeq(0)
@@ -42,6 +43,9 @@ export default function TreeSession() {
   const [nodeSeq, setNodeSeq] = useState(0)
   const [highlightId, setHighlightId] = useState(null)
   const [highlightIds, setHighlightIds] = useState([])
+  // only allow toasts for assistant messages created after a successful POST (sendMessage)
+  // initialize to +Infinity to suppress all toasts from history GET responses
+  const allowedToastAfterRef = useRef(Number.POSITIVE_INFINITY)
 
   // react to assistant messages: perform operations and highlight nodes
   useEffect(() => {
@@ -50,142 +54,83 @@ export default function TreeSession() {
     const lastAssistant = [...messages].reverse().find(m => !m.is_user_message)
     if (!lastAssistant) return
     try {
-      let meta = null
-      if (lastAssistant.response) {
-        if (typeof lastAssistant.response === 'string') {
-          try {
-            meta = JSON.parse(lastAssistant.response)
-          } catch (e) {
-            // sometimes response may be double-encoded or include escaped characters
-            try {
-              meta = JSON.parse(JSON.parse(lastAssistant.response))
-            } catch (e2) {
-              // give up and leave meta null
-              meta = null
-            }
-          }
-        } else if (typeof lastAssistant.response === 'object') {
-          meta = lastAssistant.response
-        }
-      }
+      const meta = lastAssistant.response ? JSON.parse(lastAssistant.response) : null
       if (meta) {
-          // If backend returned authoritative tree_data, use it to update ReactFlow
-          if (meta.tree_data && (Array.isArray(meta.tree_data.nodes) || Array.isArray(meta.tree_data.edges))) {
-            // normalize numeric positions and compute bounding box
-            const rawNodes = Array.isArray(meta.tree_data.nodes) ? meta.tree_data.nodes.map(n => ({ ...n })) : []
-            const rawEdges = Array.isArray(meta.tree_data.edges) ? meta.tree_data.edges : []
+        // apply operations if present
+        if (Array.isArray(meta.operations)) {
+          // decide whether to show toasts based on whether this assistant message
+          // was created after the most recent successful POST (sendMessage)
+          const msgTime = lastAssistant.created_at ? new Date(lastAssistant.created_at).getTime() : Date.now()
+          const allowToasts = msgTime >= (allowedToastAfterRef.current || 0)
+          meta.operations.forEach(op => {
+            const action = (op.action || '').toLowerCase()
+            if (action === 'insert' && (op.value || op.label)) {
+              // support parent linking info and direction
+              const parentId = op.parent_id || op.node_id || op.parent || op.parentId || null
+              const parentLabel = op.parent_label || op.parentLabel || op.parent_label || null
+              const direction = op.direction || op.side || op.position || null
+              insertNode(op.value || op.label, !allowToasts, { parentId, parentLabel, direction })
+            } else if (action === 'delete' && (op.value || op.label || op.node_id)) {
+              deleteNodeByValue(op.value || op.label || op.node_id, !allowToasts)
+            } else if (action === 'connect' && (op.source || op.source_id) && (op.target || op.target_id)) {
+                // explicit connect operation with binary-child enforcement
+                const source = String(op.source || op.source_id)
+                const target = String(op.target || op.target_id)
+                const side = (op.side || op.direction || op.position || '').toLowerCase()
 
-            const asNumber = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0 }
-            const normalizePos = (node) => {
-              const pos = node.position || {}
-              return { x: asNumber(pos.x), y: asNumber(pos.y) }
-            }
+                // find source node and check existing children
+                const sourceNode = nodes.find(n => String(n.id) === source)
+                let existingLeft = false
+                let existingRight = false
+                edges.forEach(e => {
+                  if (String(e.source) === source) {
+                    const tgt = nodes.find(n => String(n.id) === String(e.target))
+                    if (tgt && tgt.position && sourceNode && sourceNode.position) {
+                      if ((tgt.position.x || 0) < (sourceNode.position.x || 0)) existingLeft = true
+                      else existingRight = true
+                    } else if (e.data && e.data.side) {
+                      if (e.data.side === 'left') existingLeft = true
+                      if (e.data.side === 'right') existingRight = true
+                    } else {
+                      // no reliable side info; do not assume occupancy
+                    }
+                  }
+                })
 
-            const bboxOf = (nodesArr, excludeIds = []) => {
-              const xs = []
-              const ys = []
-              nodesArr.forEach(n => {
-                if (excludeIds.includes(String(n.id))) return
-                const p = normalizePos(n)
-                xs.push(p.x)
-                ys.push(p.y)
-              })
-              if (xs.length === 0) return null
-              return { minX: Math.min(...xs), maxX: Math.max(...xs), minY: Math.min(...ys), maxY: Math.max(...ys) }
-            }
+                // if both occupied, notify and skip
+                if (existingLeft && existingRight) {
+                  try { dispatch(addLocalMessage({ id: `tmp-assist-${Date.now()}`, tree_session_id: id, message: 'Parent already has both left and right children. Cannot add another child.', is_user_message: false, created_at: new Date().toISOString() })) } catch (e) {}
+                  if (!allowToasts) {} else toast.warn('Parent already has both children')
+                  return
+                }
 
-            // ensure positions are numeric
-            rawNodes.forEach(n => { n.position = normalizePos(n) })
+                // if side specified and occupied, notify and skip
+                if ((side === 'left' && existingLeft) || (side === 'right' && existingRight)) {
+                  try { dispatch(addLocalMessage({ id: `tmp-assist-${Date.now()}`, tree_session_id: id, message: `Parent already has a ${side} child.`, is_user_message: false, created_at: new Date().toISOString() })) } catch (e) {}
+                  if (!allowToasts) {} else toast.warn(`Parent already has a ${side} child`)
+                  return
+                }
 
-            // If server provided apply_results with node ids, try to move any newly created nodes
-            // that ended up far outside the existing tree bbox closer to the tree so they are visible.
-            const results = Array.isArray(meta.apply_results) ? meta.apply_results : []
-            const createdIds = results.filter(r => r && r.success && r.node_id).map(r => String(r.node_id))
-
-            if (createdIds.length > 0) {
-              // compute bbox excluding the new nodes (treat them as to-be-placed)
-              const bboxExcl = bboxOf(rawNodes, createdIds)
-              const offset = 160
-              // if no existing nodes, fallback to center of wrapper
-              const wrapperRect = flowWrapperRef.current ? flowWrapperRef.current.getBoundingClientRect() : null
-
-              createdIds.forEach(cid => {
-                const node = rawNodes.find(nn => String(nn.id) === cid)
-                if (!node) return
-                const p = node.position || { x: 0, y: 0 }
-                let shouldMove = false
-                if (!bboxExcl) {
-                  shouldMove = true
+                const edgeId = `e${source}-${target}`
+                const newEdge = { id: edgeId, source, target, animated: true, style: { stroke: '#0d6efd', strokeWidth: 2 }, markerEnd: { type: MarkerType.ArrowClosed, color: '#0d6efd', width: 18, height: 18 }, data: { side: (side === 'left' || side === 'right') ? side : undefined } }
+                setEdges(prev => [...prev, newEdge])
+                if (!allowToasts) {
+                  // suppressed by history/gating
                 } else {
-                  // if node is too far from bounding box (e.g., > 2*width away) or at origin
-                  const distX = Math.abs(p.x - ((bboxExcl.minX + bboxExcl.maxX) / 2))
-                  const bboxWidth = Math.max(1, bboxExcl.maxX - bboxExcl.minX)
-                  if (distX > Math.max(300, bboxWidth * 2) || (p.x === 0 && p.y === 0)) {
-                    shouldMove = true
-                  }
-                }
-
-                if (shouldMove) {
-                  if (bboxExcl) {
-                    const centerY = Math.floor((bboxExcl.minY + bboxExcl.maxY) / 2)
-                    node.position.x = bboxExcl.maxX + offset + Math.floor(Math.random() * 40 - 20)
-                    node.position.y = centerY + Math.floor(Math.random() * 40 - 20)
-                  } else if (wrapperRect) {
-                    node.position.x = Math.floor(wrapperRect.width / 2)
-                    node.position.y = Math.floor(wrapperRect.height / 2)
-                  } else {
-                    node.position.x = rawNodes.length * 120
-                    node.position.y = rawNodes.length * 60
-                  }
-                }
-              })
-            }
-
-            setNodes(rawNodes)
-            setEdges(rawEdges)
-            setNodeSeq(rawNodes.length)
-            // ensure the ReactFlow viewport shows newly created nodes
-            setTimeout(() => {
-              try {
-                reactFlowInstanceRef.current?.fitView?.({ padding: 0.12 })
-              } catch (err) {
-                // ignore
+                  toast.success('Nodes linked')
               }
-            }, 60)
-          } else {
-            // apply operations if present (client-side fallback)
-            if (Array.isArray(meta.operations)) {
-              meta.operations.forEach(op => {
-                const action = (op.action || '').toLowerCase()
-                if (action === 'insert' && (op.value || op.label)) {
-                  insertNode(op)
-                } else if (action === 'delete' && (op.value || op.label)) {
-                  deleteNodeByValue(op.value || op.label)
-                } else if (action === 'highlight' && op.node_id) {
-                  setHighlightId(String(op.node_id))
-                  setTimeout(() => setHighlightId(null), 2000)
-                }
-              })
+            } else if (action === 'highlight' && op.node_id) {
+              setHighlightId(String(op.node_id))
+              setTimeout(() => setHighlightId(null), 2000)
             }
-          }
-
-          // apply highlights array
-          if (Array.isArray(meta.highlights) && meta.highlights.length > 0) {
-            setHighlightIds(meta.highlights.map(String))
-            // clear after a short time
-            setTimeout(() => setHighlightIds([]), 2000)
-          }
-
-          // show results of applying operations (if provided)
-          if (Array.isArray(meta.apply_results) && meta.apply_results.length > 0) {
-            meta.apply_results.forEach(r => {
-              if (r.success) {
-                toast.success('Operation applied successfully')
-              } else {
-                toast.error('Operation failed: ' + (r.reason || 'unknown'))
-              }
-            })
-          }
+          })
+        }
+        // apply highlights array
+        if (Array.isArray(meta.highlights) && meta.highlights.length > 0) {
+          setHighlightIds(meta.highlights.map(String))
+          // clear after a short time
+          setTimeout(() => setHighlightIds([]), 2000)
+        }
       }
     } catch (e) {
       // ignore parse errors
@@ -193,124 +138,102 @@ export default function TreeSession() {
     }
   }, [messages])
 
-  const generateId = () => `${Date.now().toString(36)}-${Math.floor(Math.random()*10000)}`
+  // Insert a node. options can contain { parentId, parentLabel, direction }
+  // direction can be 'left' or 'right' to position the new node relative to the parent
+  const insertNode = (value, suppressToast = false, options = {}) => {
+    const nextId = String(nodeSeq + 1)
+    // default placement grid if no parent provided
+    let x = Math.floor(nodes.length / 5) * 140
+    let y = (nodes.length % 5) * 120
 
-  const insertNode = (opOrValue) => {
-    // support being called with either a primitive value (label) or an operation object
-    let value = null
-    let parentId = null
-    let side = ''
-    let explicitPos = null
-    if (opOrValue && typeof opOrValue === 'object') {
-      value = opOrValue.value || opOrValue.label
-      parentId = opOrValue.parent_id || opOrValue.parent || opOrValue.node_id || opOrValue.target
+    const newNode = { id: nextId, data: { label: String(value) }, position: { x, y }, targetPosition: 'top', sourcePosition: 'bottom' }
 
-      // Detect explicit position objects (x/y) first
-      if (opOrValue.position && typeof opOrValue.position === 'object' && (opOrValue.position.x != null || opOrValue.position.y != null)) {
-        explicitPos = opOrValue.position
-      }
+    // if a parent is provided, try to position next to it and create an edge
+    const parentId = options.parentId || null
+    const parentLabel = options.parentLabel || null
+    let parentNode = null
+    if (parentId) parentNode = nodes.find(n => String(n.id) === String(parentId))
+    if (!parentNode && parentLabel) parentNode = nodes.find(n => String(n.data?.label) === String(parentLabel))
 
-      // Look for side/direction in multiple possible keys
-      const candidates = [opOrValue.side, opOrValue.direction, opOrValue.location, opOrValue.where, opOrValue.pos, opOrValue.position?.side]
-      for (const c of candidates) {
-        if (!c) continue
-        if (typeof c === 'string') {
-          const s = c.toLowerCase()
-          if (s.includes('left')) { side = 'left'; break }
-          if (s.includes('right')) { side = 'right'; break }
+    if (parentNode) {
+      // determine existing children for this parent
+      let existingLeft = false
+      let existingRight = false
+      edges.forEach(e => {
+        if (String(e.source) === String(parentNode.id)) {
+          // try to find the target node to determine side
+          const tgt = nodes.find(n => String(n.id) === String(e.target))
+          if (tgt && tgt.position && parentNode.position) {
+            if ((tgt.position.x || 0) < (parentNode.position.x || 0)) existingLeft = true
+            else existingRight = true
+          } else if (e.data && e.data.side) {
+            if (e.data.side === 'left') existingLeft = true
+            if (e.data.side === 'right') existingRight = true
+          } else {
+            // no reliable info about this child side — do not assume occupancy
+          }
         }
-        // if candidate is an object with x/y, treat as explicit position
-        if (typeof c === 'object' && (c.x != null || c.y != null)) { explicitPos = c; break }
-      }
-    } else {
-      value = opOrValue
-    }
-    if (!value) { toast.warn('No value to insert'); return }
+      })
 
-    const id = generateId()
-    let x = 0, y = 0
+      // desired direction
+      const dir = (options.direction || '').toLowerCase()
+      const desired = (dir === 'left' || dir === 'right') ? dir : 'right'
 
-    // If explicit position provided, honor it
-    if (explicitPos && explicitPos.x != null && explicitPos.y != null) {
-      x = explicitPos.x
-      y = explicitPos.y
-    } else if (parentId) {
-      // place relative to parent (left/right) if possible
-      const parent = nodes.find(n => String(n.id) === String(parentId) || String(n.data?.label) === String(parentId))
-      if (parent) {
-        const offset = 160
-        const parentX = parent.position?.x != null ? parent.position.x : 0
-        const parentY = parent.position?.y != null ? parent.position.y : 0
-        x = parentX + (side === 'left' ? -offset : offset)
-        y = parentY + 40
-      } else {
-        // fallback to center of visible flow area
-        const rect = flowWrapperRef.current ? flowWrapperRef.current.getBoundingClientRect() : null
-        x = rect ? rect.width / 2 - 42 : (nodes.length ? nodes.length * 100 : 0)
-        y = rect ? rect.height / 2 - 42 : (nodes.length ? nodes.length * 60 : 0)
+      // if both children exist, inform via assistant message and bail
+      if (existingLeft && existingRight) {
+        // add a local assistant message informing the user
+        try {
+          dispatch(addLocalMessage({ id: `tmp-assist-${Date.now()}`, tree_session_id: id, message: 'Parent already has both left and right children. Cannot add another child.', is_user_message: false, created_at: new Date().toISOString() }))
+        } catch (e) {}
+        if (!suppressToast) toast.warn('Parent already has both children')
+        return
       }
-    } else {
-      // default: put new node in the center of the ReactFlow wrapper (if available)
-      const rect = flowWrapperRef.current ? flowWrapperRef.current.getBoundingClientRect() : null
-      if (rect) {
-        x = rect.width / 2 - 42
-        y = rect.height / 2 - 42
-      } else {
-        // fallback grid layout
-        y = (nodes.length % 5) * 120
-        x = Math.floor(nodes.length / 5) * 140
-      }
-    }
 
-    const newNode = { id, data: { label: String(value) }, position: { x, y }, targetPosition: 'top', sourcePosition: 'bottom' }
-
-    // If parent exists and was requested, place as a child: next level down and left/right of parent
-    const parent = parentId ? nodes.find(n => String(n.id) === String(parentId) || String(n.data?.label) === String(parentId)) : null
-    let finalX = x
-    let finalY = y
-    const hOffset = 140
-    const vStep = 120
-    if (parent && !explicitPos) {
-      const parentX = parent.position?.x || 0
-      const parentY = parent.position?.y || 0
-      finalX = side === 'left' ? parentX - hOffset : parentX + hOffset
-      finalY = parentY + vStep
-      // avoid collisions
-      let attempts = 0
-      while (nodes.some(n => Math.abs((n.position?.x || 0) - finalX) < 40 && Math.abs((n.position?.y || 0) - finalY) < 40) && attempts < 5) {
-        finalX += side === 'left' ? -hOffset : hOffset
-        finalY += 20
-        attempts += 1
+      // if desired side already occupied, inform and bail
+      if ((desired === 'left' && existingLeft) || (desired === 'right' && existingRight)) {
+        try {
+          dispatch(addLocalMessage({ id: `tmp-assist-${Date.now()}`, tree_session_id: id, message: `Parent already has a ${desired} child.`, is_user_message: false, created_at: new Date().toISOString() }))
+        } catch (e) {}
+        if (!suppressToast) toast.warn(`Parent already has a ${desired} child`)
+        return
       }
-    } else if (!explicitPos && nodes && nodes.length > 0) {
-      // standalone placement: place near tree bbox to the right
-      const xs = nodes.map(n => (n.position && n.position.x) || 0)
-      const ys = nodes.map(n => (n.position && n.position.y) || 0)
-      const maxX = Math.max(...xs)
-      const minY = Math.min(...ys)
-      const maxY = Math.max(...ys)
-      finalX = maxX + hOffset
-      finalY = Math.floor((minY + maxY) / 2)
+
+      // position new node relative to parent: place it one level below (next step)
+      if (parentNode.position) {
+        const horizontalOffset = 160
+        const verticalOffset = 120
+        if (desired === 'left') x = (parentNode.position.x || 0) - horizontalOffset
+        else x = (parentNode.position.x || 0) + horizontalOffset
+        // place child one level below parent
+        y = (parentNode.position.y || 0) + verticalOffset
+        newNode.position = { x, y }
+      }
+
+      // create an edge parent -> child (source: parent, target: newNode) and tag side
+      const edgeId = `e${parentNode.id}-${nextId}`
+      const newEdge = { id: edgeId, source: String(parentNode.id), target: String(nextId), animated: true, style: { stroke: '#0d6efd', strokeWidth: 2 }, markerEnd: { type: MarkerType.ArrowClosed, color: '#0d6efd', width: 18, height: 18 }, data: { side: desired } }
+
+      // use functional updates to avoid stale closures
+      setNodes((prev) => [...prev, newNode])
+      setEdges((prev) => [...prev, newEdge])
+      setNodeSeq((n) => n + 1)
+      if (!suppressToast) toast.success('Node added')
+      return
     }
 
-    const nodeToAdd = { ...newNode, position: { x: finalX, y: finalY } }
-    setNodes((nds) => [...nds, nodeToAdd])
-    if (parent) {
-      const newEdge = { id: `${parent.id}-${nodeToAdd.id}`, source: parent.id, target: nodeToAdd.id, animated: true, style: { stroke: '#0d6efd', strokeWidth: 2 }, markerEnd: { type: MarkerType.ArrowClosed, color: '#0d6efd', width: 18, height: 18 } }
-      setEdges((eds) => [...eds, newEdge])
-    }
-    setNodeSeq(s => s + 1)
-    toast.success('Node added')
+    // fallback: add without parent link
+    setNodes((prev) => [...prev, newNode])
+    setNodeSeq((n) => n + 1)
+    if (!suppressToast) toast.success('Node added')
   }
 
-  const deleteNodeByValue = (value) => {
-    const target = nodes.find(n => n.data?.label == value)
-    if (!target) { toast.warn('Node not found'); return }
-    const remainingNodes = nodes.filter(n => n.id !== target.id)
-    const remainingEdges = edges.filter(e => e.source !== target.id && e.target !== target.id)
-    setNodes(remainingNodes)
-    setEdges(remainingEdges)
-    toast.success('Node deleted')
+  const deleteNodeByValue = (value, suppressToast = false) => {
+    // allow deleting by label or id
+    const target = nodes.find(n => String(n.data?.label) === String(value) || String(n.id) === String(value))
+    if (!target) { if (!suppressToast) toast.warn('Node not found'); return }
+    setNodes((prev) => prev.filter(n => n.id !== target.id))
+    setEdges((prev) => prev.filter(e => e.source !== target.id && e.target !== target.id))
+    if (!suppressToast) toast.success('Node deleted')
   }
 
   const traverse = (type) => {
@@ -328,13 +251,22 @@ export default function TreeSession() {
   const onSend = async (e) => {
     e.preventDefault()
     if (!input.trim()) return
-    await dispatch(sendMessage({ sessionId: id, message: input, current_tree_state: { nodes, edges } }))
+    // optimistic UI: show user's message immediately on the right
+    const tempId = `tmp-${Date.now()}`
+    const userMsg = { id: tempId, tree_session_id: id, message: input, is_user_message: true, created_at: new Date().toISOString(), pending: true }
+    dispatch(addLocalMessage(userMsg))
+    try {
+      await dispatch(sendMessage({ sessionId: id, message: input, current_tree_state: { nodes, edges } }))
+      // allow toasts for assistant messages created after this POST
+      allowedToastAfterRef.current = Date.now()
+    } catch (err) {
+      // leave optimistic message; consider marking failed in future
+    }
     setInput('')
   }
 
   const containerRef = useRef(null)
-  const flowWrapperRef = useRef(null)
-  const reactFlowInstanceRef = useRef(null)
+  // default split: ReactFlow panel 70% / Assistant panel 30%
   const [leftPct, setLeftPct] = useState(70)
   const isDraggingRef = useRef(false)
 
@@ -349,7 +281,7 @@ export default function TreeSession() {
 
   return (
     <div>
-      <div className="d-flex align-items-center justify-content-between mb-3">
+      <div className="d-flex align-items-center justify-content-start mb-3" style={{ padding: '6px 8px' }}>
         <div className="d-flex align-items-center gap-2">
           <button className="btn btn-light border" onClick={() => navigate(-1)}>Back</button>
           <h5 className="m-0">{current?.session_name || `Tree ${id}`}</h5>
@@ -384,9 +316,8 @@ export default function TreeSession() {
             nodesCount={nodes.length}
             edgesCount={edges.length}
           />
-          <div ref={flowWrapperRef} className="border rounded w-100 h-100 bg-white">
+          <div className="border rounded w-100 h-100 bg-white">
           <ReactFlow
-            onInit={(instance) => { reactFlowInstanceRef.current = instance }}
             nodes={nodes.map(n => ({
               ...n,
               style: {
@@ -420,8 +351,7 @@ export default function TreeSession() {
             <MiniMap />
             <Controls />
             <Background gap={16} size={1} />
-            </ReactFlow>
-            {/* after nodes/edges update we may want to fit view so newly added nodes are visible */}
+          </ReactFlow>
           </div>
         </div>
       </div>
@@ -449,15 +379,37 @@ export default function TreeSession() {
             </div>
           </div>
           <div className="p-3" style={{ flex: 1, overflow: 'auto' }}>
-          {messages.map((m) => (
-            <div key={m.id || m.created_at} className="mb-2">
-              <div className="small text-muted d-flex justify-content-between">
-                <div>{m.is_user_message ? 'You' : 'AI'}</div>
-                <div className="text-end">{m.created_at ? new Date(m.created_at).toLocaleString() : ''}</div>
+          {messages.map((m) => {
+            const key = m.id || m.created_at || Math.random()
+            const isUser = !!m.is_user_message
+            let text = m.message || ''
+            // prefer parsed reply for assistant messages if present
+            if (!isUser && m.response) {
+              if (typeof m.response === 'string') {
+                try { const parsed = JSON.parse(m.response); if (parsed && parsed.reply) text = parsed.reply; else text = m.message || m.response } catch (e) { text = m.message || m.response }
+              } else if (typeof m.response === 'object') {
+                text = m.response.reply || m.message || JSON.stringify(m.response)
+              }
+            }
+
+            return (
+              <div key={key} className={`mb-3 d-flex ${isUser ? 'justify-content-end' : 'justify-content-start'}`}>
+                <div style={{ maxWidth: '74%' }}>
+                  <div className="small text-muted mb-1" style={{ fontWeight: 600 }}>{isUser ? 'You' : (m.username || 'AI')}</div>
+                  {isUser ? (
+                    <div style={{ background: '#eef6ff', color: '#0d6efd', padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(13,110,253,0.12)', textAlign: 'right' }}>
+                      <div style={{ whiteSpace: 'pre-wrap' }}>{text}</div>
+                    </div>
+                  ) : (
+                    <div style={{ background: '#e8fff4', color: '#0b6b3a', padding: '12px 14px', borderRadius: 10, border: '1px solid rgba(11,107,58,0.08)' }}>
+                      <div style={{ fontWeight: 700, marginBottom: 6 }}>{m.username || 'Assistant'}</div>
+                      <div style={{ whiteSpace: 'pre-wrap' }}>{text}</div>
+                    </div>
+                  )}
+                </div>
               </div>
-              <div>{m.message}</div>
-            </div>
-          ))}
+            )
+          })}
           {messages.length === 0 && (
             <div className="text-muted">
               <div className="mb-2">👋 Hello! I'm TreeView AI</div>

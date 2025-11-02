@@ -51,33 +51,27 @@ app.include_router(chat.router, prefix="/api/chat", tags=["Chat"])
 candidate = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'client', 'dist'))
 FRONTEND_BUILD_DIR = candidate if os.path.isdir(candidate) else None
 
-# Serve SPA only when DEPLOY_ENV is 'cloud' (mirrors NODE_ENV === 'production')
-DEPLOY_ENV = os.getenv('DEPLOY_ENV', '').lower()
-if DEPLOY_ENV == 'cloud' and FRONTEND_BUILD_DIR:
-    # Instead of mounting StaticFiles at '/' (which can cause 404s for SPA deep links),
-    # register a single catch-all route that will:
-    #  - return the requested file from the Vite build if it exists (assets like /assets/..)
-    #  - otherwise return index.html so the client-side router can handle the path
-    # Keep API routers registered above so requests to /api/* continue to work normally.
+# Serve SPA if a built frontend exists in client/dist — useful for local image builds.
+if FRONTEND_BUILD_DIR:
     @app.get('/{full_path:path}', include_in_schema=False)
     async def spa_fallback(full_path: str):
-        # full_path may be empty for root
         requested_path = full_path or ''
-        # compute absolute candidate file path
         candidate_path = os.path.join(FRONTEND_BUILD_DIR, requested_path)
-
-        # If the requested file exists in the build dir and is a file, serve it directly
         if os.path.isfile(candidate_path):
             return FileResponse(candidate_path)
-
-        # Otherwise serve index.html so the SPA can handle client-side routing
         index_path = os.path.join(FRONTEND_BUILD_DIR, 'index.html')
         return FileResponse(index_path)
 else:
-    # Non-cloud mode: act as API server; root returns plain text like the express template
     @app.get('/')
     async def root():
-        return PlainTextResponse('API is runninng...')
+        return PlainTextResponse('API is running...')
+
+# Register debug router in development if available
+try:
+    from app.api import debug as debug_router
+    app.include_router(debug_router.router, prefix='/api/debug', tags=['Debug'])
+except Exception:
+    pass
 
 
 @app.get("/health")

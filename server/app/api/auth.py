@@ -30,9 +30,17 @@ async def register(user_data: UserCreate, db: Session = Depends(get_db)):
 
 @router.post("/login", response_model=Token)
 async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.username == form_data.username).first()
+    # treat the OAuth2 form's username field as email for our app (client sends email in username)
+    user = db.query(User).filter(User.email == form_data.username).first()
+    # log an attempt for debugging
+    try:
+        import logging
+        logging.getLogger('uvicorn.access').info(f'Login attempt for email={form_data.username}')
+    except Exception:
+        pass
+
     if not user or not verify_password(form_data.password, user.hashed_password):
-        raise HTTPException(status_code=401, detail="Incorrect username or password", headers={"WWW-Authenticate": "Bearer"})
+        raise HTTPException(status_code=401, detail="Incorrect email or password", headers={"WWW-Authenticate": "Bearer"})
     if not user.is_active:
         raise HTTPException(status_code=400, detail="Inactive user account")
     access_token = create_access_token(data={"sub": user.id})

@@ -26,7 +26,7 @@ export default function App() {
   return (
     <div className="d-flex flex-column" style={{ minHeight: '100vh' }}>
       <Navbar />
-      <div className="container-fluid flex-grow-1 py-3">
+      <div className="container-fluid flex-grow-1 py-2">
         <Routes>
           <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
           <Route path="/session/:id" element={<ProtectedRoute><TreeSession /></ProtectedRoute>} />

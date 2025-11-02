@@ -18,10 +18,12 @@ export const signupThunk = createAsyncThunk('auth/signup', async (payload, { rej
   }
 })
 
-export const loginThunk = createAsyncThunk('auth/login', async ({ username, password }, { rejectWithValue }) => {
+export const loginThunk = createAsyncThunk('auth/login', async (payload, { rejectWithValue }) => {
   try {
+    const usernameVal = payload?.email || payload?.username || ''
+    const password = payload?.password || ''
     const params = new URLSearchParams()
-    params.append('username', username)
+    params.append('username', usernameVal)
     params.append('password', password)
     const { data } = await api.post('/api/auth/login', params, { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } })
     return data

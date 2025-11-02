@@ -21,7 +21,7 @@ export default function Dashboard() {
 
   return (
     <div>
-      <div className="mb-4">
+      <div className="mb-4 tvai-hero">
         <h2 className="m-0">Your Tree Sessions</h2>
         <div className="text-muted">Create, manage, and visualize your tree data structures</div>
       </div>
@@ -53,7 +53,7 @@ export default function Dashboard() {
         {sessions.map(s => (
           <div className="col" key={s.id}>
             <div className="bg-white border rounded-3 p-3 h-100 d-flex flex-column tvai-card" style={{ minHeight: 120 }}>
-              <div className="d-flex align-items-center gap-3 mb-2">
+              <div className="d-flex align-items-center gap-3 mb-4">
                 <div className="rounded bg-primary bg-opacity-10 text-primary d-flex align-items-center justify-content-center" style={{ width: 36, height: 36 }}>
                   <i className="bi bi-folder2-open"></i>
                 </div>
@@ -62,7 +62,7 @@ export default function Dashboard() {
                   <div className="text-muted small">Created {new Date(s.created_at).toLocaleDateString()}</div>
                 </div>
               </div>
-              <div className="text-uppercase small text-muted mb-3">{s.tree_type}</div>
+              <div className="text-uppercase small text-muted mb-3 visually-hidden">{s.tree_type}</div>
               <div className="mt-auto d-flex gap-2">
                 <Link className="btn btn-primary" to={`/session/${s.id}`}>Open</Link>
                 <button
