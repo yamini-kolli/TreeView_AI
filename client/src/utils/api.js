@@ -3,8 +3,8 @@ import axios from 'axios'
 const api = axios.create({
   // Default to the backend dev server used by uvicorn (port 8000).
   // You can override this by setting VITE_API_BASE in the client's .env file.
-  baseURL: import.meta.env.VITE_API_BASE || 'http://localhost:8080',
-  // baseURL: import.meta.env.VITE_API_BASE || 'http://13.54.127.161:8080',
+  // baseURL: import.meta.env.VITE_API_BASE || 'http://localhost:8080',
+   baseURL: import.meta.env.VITE_API_BASE || 'http://13.54.127.161:8080',
 
 })
 
