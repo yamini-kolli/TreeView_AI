@@ -131,9 +131,16 @@ Screenshots
 
 ### Dashboard page
   ![Dashboard Page](https://raw.githubusercontent.com/yamini-kolli/TreeView_AI/main/dashboardpage.png)
+  
+
+  ![Dashboard Page](https://github.com/yamini-kolli/TreeView_AI/blob/main/working_dashboard.png)
 
 ### Tree Session (React Flow)  
 ![Tree Session](https://raw.githubusercontent.com/yamini-kolli/TreeView_AI/main/TreeSessionpage.png)
+
+
+![Tree Session](https://github.com/yamini-kolli/TreeView_AI/blob/main/working_TreeSession.png)
+
   
 # Development Process
 The project was developed as a full-stack application. Key steps included:
