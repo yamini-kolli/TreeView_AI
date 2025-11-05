@@ -105,6 +105,7 @@ docker-compose up -d
 Port conflict note: If `docker run` fails with "Bind for 0.0.0.0:8080 failed: port is already allocated", either stop the container/process using that port or run with a different host port (e.g., `-p 8081:8080`).
 
 API Endpoints (typical / examples)
+[http://13.54.127.161:8080/docs](http://13.54.127.161:8080/docs)
 - Authentication
   - POST /api/auth/register — register new user
   - POST /api/auth/login — login user (returns token)
@@ -141,7 +142,7 @@ Screenshots
 
 ![Tree Session](https://github.com/yamini-kolli/TreeView_AI/blob/main/working_TreeSession.png)
 
-  
+
 # Development Process
 The project was developed as a full-stack application. Key steps included:
 - Designing session + tree data structures to support nodes and edges
